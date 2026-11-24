@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Master Script Manager
 // @namespace    https://github.com/bbbocl/ngh
-// @version      1.2
+// @version      1.3
 // @description  Cloud userscript manager (Press Alt + M to open panel)
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
@@ -178,7 +178,7 @@
     overlay.id = "gh-master-panel-overlay";
     overlay.style.cssText = `
       position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 2147483647;
-      display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; direction: rtl;
+      display: flex; align-items: center; justify-content: center; font-family: system-ui, -apple-system, sans-serif; direction: ltr; text-align: left;
     `;
 
     const box = document.createElement("div");
@@ -189,18 +189,18 @@
 
     box.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <strong style="font-size:15px;">⚙️ إدارة السكربتات السحابية</strong>
-        <button id="gh-close-btn" style="background:none; border:none; color:#8b949e; font-size:18px; cursor:pointer;">✖</button>
+        <strong style="font-size:15px;">⚙️ Cloud Script Manager</strong>
+        <button id="gh-close-btn" style="background:none; border:none; color:#8b949e; font-size:18px; cursor:pointer;" title="Close">✖</button>
       </div>
       <button id="gh-sync-btn" style="width:100%; padding:9px; background:#238636; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; margin-bottom:8px;">
-        🔄 مزامنة وتحديث القائمة من GitHub
+        🔄 Sync & Update from GitHub
       </button>
       <div id="gh-status" style="font-size:11px; color:#8b949e; text-align:center; margin-bottom:12px;"></div>
-      <div style="font-size:12px; color:#8b949e; border-bottom:1px solid #30363d; padding-bottom:4px; margin-bottom:8px;">السكربتات المتوفرة (JS)</div>
+      <div style="font-size:12px; color:#8b949e; border-bottom:1px solid #30363d; padding-bottom:4px; margin-bottom:8px;">Available Scripts (JS)</div>
       <div id="gh-scripts-list"></div>
-      <div style="font-size:12px; color:#8b949e; border-bottom:1px solid #30363d; padding-bottom:4px; margin:12px 0 8px;">الصفحات (HTML)</div>
+      <div style="font-size:12px; color:#8b949e; border-bottom:1px solid #30363d; padding-bottom:4px; margin:12px 0 8px;">Pages (HTML)</div>
       <div id="gh-pages-list"></div>
-      <div style="font-size:11px; color:#8b949e; text-align:center; margin-top:12px;">أعد تحميل الصفحة (F5) بعد تفعيل أو إيقاف أي سكربت</div>
+      <div style="font-size:11px; color:#8b949e; text-align:center; margin-top:12px;">Reload the page (F5) after enabling or disabling any script</div>
     `;
 
     overlay.appendChild(box);
@@ -209,11 +209,11 @@
     const renderList = () => {
       const enabledMap = GM_getValue(STORAGE_KEY, {});
       const data = GM_getValue(CACHE_KEY, { scripts: [], pages: [], lastSync: "-" });
-      document.getElementById("gh-status").textContent = `آخر مزامنة: ${data.lastSync || "-"}`;
+      document.getElementById("gh-status").textContent = `Last sync: ${data.lastSync || "-"}`;
 
       const listEl = document.getElementById("gh-scripts-list");
       if (!data.scripts.length) {
-        listEl.innerHTML = `<div style="font-size:12px; color:#8b949e; text-align:center; padding:8px;">لا توجد ملفات JS بعد</div>`;
+        listEl.innerHTML = `<div style="font-size:12px; color:#8b949e; text-align:center; padding:8px;">No JS files found</div>`;
       } else {
         listEl.innerHTML = "";
         data.scripts.forEach((s) => {
@@ -224,9 +224,9 @@
             background:#0d1117; border:1px solid #30363d; border-radius:8px; margin-bottom:6px; gap:10px;
           `;
           row.innerHTML = `
-            <div style="overflow:hidden;">
+            <div style="overflow:hidden; text-align:left;">
               <div style="font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.displayName}</div>
-              <div style="font-size:10px; color:#8b949e; direction:ltr; text-align:right;">${s.fileName}</div>
+              <div style="font-size:10px; color:#8b949e;">${s.fileName}</div>
             </div>
             <input type="checkbox" ${isOn ? "checked" : ""} style="width:18px; height:18px; accent-color:#2ea043; cursor:pointer; flex-shrink:0;">
           `;
@@ -241,8 +241,8 @@
 
       const pagesEl = document.getElementById("gh-pages-list");
       pagesEl.innerHTML = data.pages.length
-        ? data.pages.map((p) => `<a href="${p.url}" target="_blank" style="display:block; padding:7px 10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#58a6ff; text-decoration:none; font-size:12px; margin-bottom:5px;">🌐 ${p.name}</a>`).join("")
-        : `<div style="font-size:12px; color:#8b949e; text-align:center;">لا توجد صفحات HTML</div>`;
+        ? data.pages.map((p) => `<a href="${p.url}" target="_blank" style="display:block; padding:7px 10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#58a6ff; text-decoration:none; font-size:12px; margin-bottom:5px; text-align:left;">🌐 ${p.name}</a>`).join("")
+        : `<div style="font-size:12px; color:#8b949e; text-align:center;">No HTML pages found</div>`;
     };
 
     renderList();
@@ -250,7 +250,7 @@
     document.getElementById("gh-close-btn").onclick = () => overlay.remove();
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
     document.getElementById("gh-sync-btn").onclick = async () => {
-      document.getElementById("gh-status").textContent = "جاري السحب من GitHub...";
+      document.getElementById("gh-status").textContent = "Syncing from GitHub...";
       await syncAndRun(false);
       renderList();
     };
