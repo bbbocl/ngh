@@ -1,5 +1,5 @@
-// @name (CSS Selector Picker)
-// @match https://apphiss1vi.moh.gov.sa/*
+// @name CSS Selector Picker
+// @match *://*/*
 
 (function () {
   'use strict';
@@ -17,7 +17,7 @@
       .abdullah-picker-highlight {
         outline: 2px dashed #10b981 !important;
         outline-offset: 2px !important;
-        background-color: rgba(16, 185, 129, 0.12) !important;
+        background-color: rgba(16, 185, 129, 0.14) !important;
         cursor: crosshair !important;
       }
       #${TOAST_ID} {
@@ -33,8 +33,8 @@
         z-index: 2147483647;
         font-family: system-ui, -apple-system, sans-serif;
         font-size: 13px;
-        direction: rtl;
-        text-align: right;
+        direction: ltr;
+        text-align: left;
         box-shadow: 0 10px 25px rgba(0, 0, 0, 0.45);
         max-width: 90vw;
         pointer-events: none;
@@ -48,8 +48,6 @@
         border-radius: 6px;
         font-family: Consolas, monospace;
         font-size: 12px;
-        direction: ltr;
-        text-align: left;
         word-break: break-all;
       }
     `;
@@ -65,7 +63,6 @@
 
   function isValidStaticId(id) {
     if (!id) return false;
-    // تجاهل المعرفات العشوائية التي تتغير مع كل تحديث للصفحة
     if (/^(ng-|cdk-|mat-|b-|_ng|ember|react)/i.test(id)) return false;
     if (/\d{5,}/.test(id)) return false;
     return true;
@@ -173,7 +170,7 @@
     const toast = document.createElement('div');
     toast.id = TOAST_ID;
     toast.innerHTML = `
-      <strong>✅ تم نسخ معرف العنصر بنجاح:</strong>
+      <strong>Copied CSS Selector:</strong>
       <div style="font-size:11px; color:#94a3b8; margin-top:2px;">${infoLine}</div>
       <code>${selector}</code>
     `;
@@ -185,7 +182,6 @@
 
   function getInteractiveTarget(el) {
     if (!el || el.nodeType !== 1) return null;
-    // إذا ضغطت على أيقونة أو نص داخل زر، يلتقط الزر نفسه تلقائياً
     const closestInteractive = el.closest('button, a, input, select, textarea, ng-select, [role="button"]');
     return closestInteractive || el;
   }
@@ -223,7 +219,6 @@
     }
   }, true);
 
-  // منع تنفيذ ضغطة الزر الحقيقية أثناء الاستمرار بالضغط على Alt
   ['mousedown', 'mouseup'].forEach((evtName) => {
     document.addEventListener(evtName, (e) => {
       if (e.altKey) {
@@ -248,7 +243,7 @@
     const cssSelector = buildCssSelector(target);
     const tag = target.tagName.toLowerCase();
     const text = (target.innerText || target.value || target.getAttribute('placeholder') || '').trim().replace(/\s+/g, ' ').slice(0, 40);
-    const infoLine = `النوع: ${tag}${text ? ` | النص: "${text}"` : ''}`;
+    const infoLine = `Tag: ${tag}${text ? ` | Label: "${text}"` : ''}`;
 
     const payload = `CSS: ${cssSelector}\nInfo: ${infoLine}`;
     await copyToClipboard(payload);
