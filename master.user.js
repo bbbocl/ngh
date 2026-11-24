@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         GitHub Master Script Manager
 // @namespace    https://github.com/bbbocl/ngh
-// @version      1.0
+// @version      1.1
 // @description  مدير السكربتات السحابي المخفي (يُفتح عبر Alt + M)
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @connect      api.github.com
-// @connect      raw.githubusercontent.com
+// @grant        unsafeWindow
+// @connect      *
 // ==/UserScript==
 
 (function () {
@@ -46,12 +46,11 @@
     });
   }
 
+  // تشغيل السكربت داخل بيئة الإضافة لتجاوز قيود CSP في أي موقع
   function executeScriptCode(code, fileName) {
     try {
-      const scriptEl = document.createElement("script");
-      scriptEl.textContent = `(function(){\n${code}\n})();`;
-      (document.head || document.documentElement).appendChild(scriptEl);
-      scriptEl.remove();
+      const runner = new Function("window", "document", "GM_xmlhttpRequest", "GM_getValue", "GM_setValue", code);
+      runner(unsafeWindow || window, document, GM_xmlhttpRequest, GM_getValue, GM_setValue);
     } catch (err) {
       console.error(`[MasterRunner] خطأ في تشغيل ${fileName}:`, err);
     }
