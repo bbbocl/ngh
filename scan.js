@@ -1,4 +1,4 @@
-// @name أتمتة المسح الضوئي (Scan)
+// @name auto scan
 // @match https://apphiss1vi.moh.gov.sa/*
 
 (function () {
