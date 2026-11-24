@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         GitHub Master Script Manager
 // @namespace    https://github.com/bbbocl/ngh
-// @version      1.1
-// @description  مدير السكربتات السحابي المخفي (يُفتح عبر Alt + M)
+// @version      1.2
+// @description  Cloud userscript manager (Press Alt + M to open panel)
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @grant        unsafeWindow
+// @grant        GM_addElement
 // @connect      *
 // ==/UserScript==
 
@@ -30,7 +30,7 @@
           if (res.status >= 200 && res.status < 300) resolve(res.responseText);
           else reject(new Error("HTTP " + res.status));
         },
-        onerror: () => reject(new Error("فشل الاتصال بـ GitHub"))
+        onerror: () => reject(new Error("Failed to connect to GitHub"))
       });
     });
   }
@@ -46,13 +46,60 @@
     });
   }
 
-  // تشغيل السكربت داخل بيئة الإضافة لتجاوز قيود CSP في أي موقع
+  // Bridge to support GM_xmlhttpRequest inside injected scripts (e.g. ntfy notifications)
+  window.addEventListener("__gh_gm_xhr__", (e) => {
+    const { id, details } = e.detail || {};
+    if (!id || !details) return;
+    GM_xmlhttpRequest({
+      method: details.method || "GET",
+      url: details.url,
+      headers: details.headers,
+      data: details.data,
+      onload: (res) => {
+        window.dispatchEvent(new CustomEvent("__gh_gm_xhr_res_" + id, {
+          detail: { ok: true, status: res.status, responseText: res.responseText }
+        }));
+      },
+      onerror: (err) => {
+        window.dispatchEvent(new CustomEvent("__gh_gm_xhr_res_" + id, {
+          detail: { ok: false, error: err }
+        }));
+      }
+    });
+  });
+
+  // Inject script safely using GM_addElement (MV3 & CSP compatible)
   function executeScriptCode(code, fileName) {
     try {
-      const runner = new Function("window", "document", "GM_xmlhttpRequest", "GM_getValue", "GM_setValue", code);
-      runner(unsafeWindow || window, document, GM_xmlhttpRequest, GM_getValue, GM_setValue);
+      const wrappedCode = `(function(){
+        const GM_xmlhttpRequest = function(details) {
+          const id = Math.random().toString(36).slice(2);
+          window.addEventListener("__gh_gm_xhr_res_" + id, function handler(ev) {
+            window.removeEventListener("__gh_gm_xhr_res_" + id, handler);
+            if (ev.detail.ok && typeof details.onload === "function") details.onload(ev.detail);
+            else if (!ev.detail.ok && typeof details.onerror === "function") details.onerror(ev.detail);
+          });
+          window.dispatchEvent(new CustomEvent("__gh_gm_xhr__", {
+            detail: { id, details: { method: details.method || "GET", url: details.url, headers: details.headers, data: details.data } }
+          }));
+        };
+        const GM_getValue = (k, d) => { try { const v = localStorage.getItem("__gh_gm_" + k); return v !== null ? JSON.parse(v) : d; } catch(e) { return d; } };
+        const GM_setValue = (k, v) => { try { localStorage.setItem("__gh_gm_" + k, JSON.stringify(v)); } catch(e) {} };
+        ${code}
+      })();`;
+
+      if (typeof GM_addElement === "function") {
+        GM_addElement(document.head || document.documentElement, "script", {
+          textContent: wrappedCode
+        });
+      } else {
+        const scriptEl = document.createElement("script");
+        scriptEl.textContent = wrappedCode;
+        (document.head || document.documentElement).appendChild(scriptEl);
+        scriptEl.remove();
+      }
     } catch (err) {
-      console.error(`[MasterRunner] خطأ في تشغيل ${fileName}:`, err);
+      console.error(`[MasterRunner] Error running ${fileName}:`, err);
     }
   }
 
@@ -111,11 +158,11 @@
 
       if (mapChanged) GM_setValue(STORAGE_KEY, enabledMap);
 
-      cachedData = { scripts: updatedScripts, pages: htmlFiles, lastSync: new Date().toLocaleTimeString("ar-SA") };
+      cachedData = { scripts: updatedScripts, pages: htmlFiles, lastSync: new Date().toLocaleTimeString("en-US") };
       GM_setValue(CACHE_KEY, cachedData);
       return cachedData;
     } catch (e) {
-      console.warn("[MasterRunner] تعذر التحديث من GitHub، تم الاعتماد على النسخة المخزنة:", e.message);
+      console.warn("[MasterRunner] GitHub sync failed, using cached scripts:", e.message);
       return cachedData;
     }
   }
