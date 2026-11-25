@@ -1,0 +1,10 @@
+{
+  "scripts": [
+    "botton.js",
+    "copy.js",
+    "css_picker.js",
+    "ecg.js",
+    "scan.js"
+  ],
+  "pages": []
+}
