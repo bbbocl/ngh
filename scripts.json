@@ -4,6 +4,7 @@
     "copy.js",
     "css_picker.js",
     "ecg.js",
+    "api_inspector.js",
     "scan.js"
   ],
   "pages": []
