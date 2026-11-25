@@ -1,6 +1,6 @@
 {
-  "commit": "4e25a16b3a6ebad8693cf0b54079fbbfb9b1db73",
-  "updatedAt": "2026-11-25T21:38:44.242Z",
+  "commit": "3f1c4ee10149e583af6f010911d88230b715ab23",
+  "updatedAt": "2026-11-25T22:00:00.329Z",
   "masterVersion": "3.1",
   "scripts": [
     "api_inspector.js",
@@ -11,6 +11,5 @@
     "ecg_print.js",
     "er_patients.js",
     "scan.js"
-  ],
-  "pages": []
+  ]
 }
