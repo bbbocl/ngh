@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Master Script Manager
 // @namespace    https://github.com/bbbocl/ngh
-// @version      3.0
-// @description  Final hospital-ready jsDelivr script manager (No scripts.json, auto-discovery, instant commit sync)
+// @version      3.1
+// @description  Instant zero-cache jsDelivr script manager via auto-manifest (Alt + M)
 // @match        *://*/*
 // @downloadURL  https://cdn.jsdelivr.net/gh/bbbocl/ngh@main/master.user.js
 // @updateURL    https://cdn.jsdelivr.net/gh/bbbocl/ngh@main/master.user.js
@@ -16,25 +16,24 @@
 (function () {
   'use strict';
 
-  const CURRENT_VERSION = "3.0";
+  const CURRENT_VERSION = "3.1";
   const GITHUB_USER = "bbbocl";
   const GITHUB_REPO = "ngh";
   const BRANCH = "main";
-  const FOLDER_PATH = "";
 
   const STORAGE_KEY = "gh_master_enabled_scripts";
   const CACHE_KEY = "gh_master_cached_files_v3";
   const UPDATE_KEY = "gh_master_pending_update_v3";
   const SYSTEM_FILES = new Set(["master.user.js", "core.js"]);
-  const basePath = FOLDER_PATH ? `${FOLDER_PATH}/` : "";
 
-  function fetchUrl(url) {
+  function fetchUrl(url, timeoutMs = 12000) {
     return new Promise((resolve, reject) => {
       const sep = url.includes("?") ? "&" : "?";
       GM_xmlhttpRequest({
         method: "GET",
         url: `${url}${sep}_cb=${Date.now()}`,
         nocache: true,
+        timeout: timeoutMs,
         headers: {
           "Cache-Control": "no-cache, no-store, must-revalidate",
           "Pragma": "no-cache",
@@ -44,10 +43,27 @@
           if (res.status >= 200 && res.status < 300) resolve(res.responseText);
           else reject(new Error("HTTP " + res.status));
         },
-        onerror: () => reject(new Error("Network error"))
+        onerror: () => reject(new Error("Network error")),
+        ontimeout: () => reject(new Error("Timeout"))
       });
     });
   }
+
+  function purgeManifest() {
+    return new Promise((resolve) => {
+      GM_xmlhttpRequest({
+        method: "GET",
+        url: `https://purge.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/manifest.json`,
+        nocache: true,
+        timeout: 4000,
+        onload: () => resolve(),
+        onerror: () => resolve(),
+        ontimeout: () => resolve()
+      });
+    });
+  }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function compareVersions(a, b) {
     const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
@@ -62,48 +78,49 @@
     return 0;
   }
 
-  async function resolveLatestCommit() {
-    const res = await fetchUrl(
-      `https://data.jsdelivr.com/v1/package/resolve/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}`
-    );
-    const data = JSON.parse(res);
-    if (data && data.version) return data.version;
-    return BRANCH;
-  }
+  async function fetchLiveState(forcePurge = false) {
+    // 1. Primary (Hospital-safe): Auto-generated manifest.json via jsDelivr
+    try {
+      if (forcePurge) {
+        await purgeManifest();
+        await sleep(800);
+      }
+      const raw = await fetchUrl(
+        `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/manifest.json`
+      );
+      const manifest = JSON.parse(raw);
+      if (manifest && manifest.commit && Array.isArray(manifest.scripts)) {
+        return {
+          ref: manifest.commit,
+          scripts: manifest.scripts.filter((n) => n.endsWith(".js") && !SYSTEM_FILES.has(n)),
+          pages: Array.isArray(manifest.pages) ? manifest.pages : [],
+          masterVersion: manifest.masterVersion || CURRENT_VERSION
+        };
+      }
+    } catch (e) {}
 
-  async function discoverRepoFiles(ref) {
-    const raw = await fetchUrl(
+    // 2. Fallback: GitHub API (if unblocked on current network)
+    const commitRaw = await fetchUrl(
+      `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/commits/${BRANCH}`,
+      4000
+    );
+    const commitData = JSON.parse(commitRaw);
+    const ref = commitData.sha || BRANCH;
+
+    const indexRaw = await fetchUrl(
       `https://data.jsdelivr.com/v1/package/gh/${GITHUB_USER}/${GITHUB_REPO}@${ref}/flat`
     );
-    const data = JSON.parse(raw);
-    if (!data || !Array.isArray(data.files)) {
-      throw new Error("Empty package index");
-    }
-
-    const prefix = FOLDER_PATH ? `/${FOLDER_PATH}/` : "/";
-    const rootNames = data.files
-      .map((f) => f.name)
-      .filter((n) => n.startsWith(prefix))
-      .map((n) => n.slice(prefix.length))
+    const indexData = JSON.parse(indexRaw);
+    const rootNames = (indexData.files || [])
+      .map((f) => f.name.replace(/^\//, ""))
       .filter((n) => !n.includes("/"));
 
     return {
+      ref,
       scripts: rootNames.filter((n) => n.endsWith(".js") && !SYSTEM_FILES.has(n)),
-      pages: rootNames.filter((n) => n.endsWith(".html"))
+      pages: rootNames.filter((n) => n.endsWith(".html")),
+      masterVersion: null
     };
-  }
-
-  async function checkMasterSelfUpdate(ref) {
-    try {
-      const masterUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${ref}/${basePath}master.user.js`;
-      const code = await fetchUrl(masterUrl);
-      const match = code.match(/\/\/\s*@version\s+([^\s]+)/);
-      if (match && compareVersions(match[1].trim(), CURRENT_VERSION) > 0) {
-        GM_setValue(UPDATE_KEY, { version: match[1].trim(), url: masterUrl });
-      } else {
-        GM_setValue(UPDATE_KEY, null);
-      }
-    } catch (e) {}
   }
 
   function isUrlMatched(patterns, currentUrl) {
@@ -175,7 +192,7 @@
 
   let isSyncing = false;
 
-  async function syncAndRun(runScripts = true) {
+  async function syncAndRun(runScripts = true, forcePurge = false) {
     const enabledMap = GM_getValue(STORAGE_KEY, {});
     let cachedData = GM_getValue(CACHE_KEY, { scripts: [], pages: [] });
 
@@ -191,16 +208,31 @@
     isSyncing = true;
 
     try {
-      const ref = await resolveLatestCommit();
-      const cdnBase = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${ref}/${basePath}`;
+      const state = await fetchLiveState(forcePurge);
+      const ref = state.ref;
+      const cdnBase = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${ref}/`;
 
-      const [{ scripts: scriptNames, pages: pageNames }] = await Promise.all([
-        discoverRepoFiles(ref),
-        checkMasterSelfUpdate(ref)
-      ]);
+      // Check if master.user.js has a newer version using exact commit URL (zero cache)
+      let latestMasterVer = state.masterVersion;
+      if (!latestMasterVer) {
+        try {
+          const mCode = await fetchUrl(`${cdnBase}master.user.js`);
+          const m = mCode.match(/\/\/\s*@version\s+([^\s]+)/);
+          if (m) latestMasterVer = m[1].trim();
+        } catch (e) {}
+      }
+
+      if (latestMasterVer && compareVersions(latestMasterVer, CURRENT_VERSION) > 0) {
+        GM_setValue(UPDATE_KEY, {
+          version: latestMasterVer,
+          url: `${cdnBase}master.user.js`
+        });
+      } else {
+        GM_setValue(UPDATE_KEY, null);
+      }
 
       const fetched = await Promise.all(
-        scriptNames.map(async (fileName) => {
+        state.scripts.map(async (fileName) => {
           try {
             const code = await fetchUrl(`${cdnBase}${fileName}`);
             const nameMatch = code.match(/\/\/\s*@name\s+(.+)/);
@@ -244,9 +276,9 @@
         });
       }
 
-      const htmlFiles = pageNames.map((pName) => ({
+      const htmlFiles = state.pages.map((pName) => ({
         name: pName,
-        url: `https://${GITHUB_USER}.github.io/${GITHUB_REPO}/${basePath}${pName}`
+        url: `https://${GITHUB_USER}.github.io/${GITHUB_REPO}/${pName}`
       }));
 
       if (mapChanged) GM_setValue(STORAGE_KEY, enabledMap);
@@ -369,13 +401,13 @@
       }
     };
 
-    const runLiveSync = async () => {
+    const runLiveSync = async (purge) => {
       const btn = document.getElementById("gh-sync-btn");
       if (btn) {
         btn.disabled = true;
-        btn.textContent = "⏳ Checking latest commit...";
+        btn.textContent = "⏳ Syncing...";
       }
-      await syncAndRun(false);
+      await syncAndRun(false, purge);
       renderList();
       if (btn) {
         btn.disabled = false;
@@ -384,11 +416,11 @@
     };
 
     renderList();
-    runLiveSync();
+    runLiveSync(false);
 
     document.getElementById("gh-close-btn").onclick = () => overlay.remove();
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-    document.getElementById("gh-sync-btn").onclick = runLiveSync;
+    document.getElementById("gh-sync-btn").onclick = () => runLiveSync(true);
   }
 
   document.addEventListener("keydown", (e) => {
@@ -399,5 +431,5 @@
     }
   }, true);
 
-  syncAndRun(true);
+  syncAndRun(true, false);
 })();
