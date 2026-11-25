@@ -1,0 +1,15 @@
+{
+  "commit": "4434efd314cffe4696476d151f0db75960f89e09",
+  "updatedAt": "2026-11-25T21:33:28.592Z",
+  "masterVersion": "3.0",
+  "scripts": [
+    "api_inspector.js",
+    "botton.js",
+    "copy.js",
+    "css_picker.js",
+    "ecg.js",
+    "er_patients.js",
+    "scan.js"
+  ],
+  "pages": []
+}
