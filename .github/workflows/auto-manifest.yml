@@ -24,7 +24,6 @@ jobs:
             const files = fs.readdirSync(".");
             const system = new Set(["master.user.js", "core.js"]);
             const scripts = files.filter(f => f.endsWith(".js") && !system.has(f)).sort();
-            const pages = files.filter(f => f.endsWith(".html")).sort();
             let masterVersion = "0.0";
             if (fs.existsSync("master.user.js")) {
               const m = fs.readFileSync("master.user.js", "utf8").match(/\/\/\s*@version\s+([^\s]+)/);
@@ -34,8 +33,7 @@ jobs:
               commit: process.env.GITHUB_SHA,
               updatedAt: new Date().toISOString(),
               masterVersion,
-              scripts,
-              pages
+              scripts
             };
             fs.writeFileSync("manifest.json", JSON.stringify(manifest, null, 2) + "\n");
           '
@@ -48,7 +46,11 @@ jobs:
           git diff --staged --quiet || git commit -m "Auto-update manifest.json [skip ci]"
           git push
 
-      - name: Purge jsDelivr cache
+      - name: Purge & warm jsDelivr cache
         run: |
+          sleep 5
           curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@main/manifest.json" > /dev/null || true
           curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@main/master.user.js" > /dev/null || true
+          sleep 3
+          curl -s "https://cdn.jsdelivr.net/gh/${{ github.repository }}@main/manifest.json" > /dev/null || true
+          curl -s "https://cdn.jsdelivr.net/gh/${{ github.repository }}@main/master.user.js" > /dev/null || true
