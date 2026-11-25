@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Master Script Manager
 // @namespace    https://github.com/bbbocl/ngh
-// @version      3.1
-// @description  Instant zero-cache jsDelivr script manager via auto-manifest (Alt + M)
+// @version      3.2
+// @description  Hospital-safe jsDelivr-only script manager with fast manifest sync (Alt + M)
 // @match        *://*/*
 // @downloadURL  https://cdn.jsdelivr.net/gh/bbbocl/ngh@main/master.user.js
 // @updateURL    https://cdn.jsdelivr.net/gh/bbbocl/ngh@main/master.user.js
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const CURRENT_VERSION = "3.1";
+  const CURRENT_VERSION = "3.2";
   const GITHUB_USER = "bbbocl";
   const GITHUB_REPO = "ngh";
   const BRANCH = "main";
@@ -49,13 +49,13 @@
     });
   }
 
-  function purgeManifest() {
+  function purgeCdnFile(fileName) {
     return new Promise((resolve) => {
       GM_xmlhttpRequest({
         method: "GET",
-        url: `https://purge.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/manifest.json`,
+        url: `https://purge.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/${fileName}`,
         nocache: true,
-        timeout: 4000,
+        timeout: 5000,
         onload: () => resolve(),
         onerror: () => resolve(),
         ontimeout: () => resolve()
@@ -79,47 +79,27 @@
   }
 
   async function fetchLiveState(forcePurge = false) {
-    // 1. Primary (Hospital-safe): Auto-generated manifest.json via jsDelivr
-    try {
-      if (forcePurge) {
-        await purgeManifest();
-        await sleep(800);
-      }
-      const raw = await fetchUrl(
-        `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/manifest.json`
-      );
-      const manifest = JSON.parse(raw);
-      if (manifest && manifest.commit && Array.isArray(manifest.scripts)) {
-        return {
-          ref: manifest.commit,
-          scripts: manifest.scripts.filter((n) => n.endsWith(".js") && !SYSTEM_FILES.has(n)),
-          pages: Array.isArray(manifest.pages) ? manifest.pages : [],
-          masterVersion: manifest.masterVersion || CURRENT_VERSION
-        };
-      }
-    } catch (e) {}
+    if (forcePurge) {
+      await Promise.all([
+        purgeCdnFile("manifest.json"),
+        purgeCdnFile("master.user.js")
+      ]);
+      await sleep(2000);
+    }
 
-    // 2. Fallback: GitHub API (if unblocked on current network)
-    const commitRaw = await fetchUrl(
-      `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/commits/${BRANCH}`,
-      4000
+    const raw = await fetchUrl(
+      `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/manifest.json`
     );
-    const commitData = JSON.parse(commitRaw);
-    const ref = commitData.sha || BRANCH;
+    const manifest = JSON.parse(raw);
 
-    const indexRaw = await fetchUrl(
-      `https://data.jsdelivr.com/v1/package/gh/${GITHUB_USER}/${GITHUB_REPO}@${ref}/flat`
-    );
-    const indexData = JSON.parse(indexRaw);
-    const rootNames = (indexData.files || [])
-      .map((f) => f.name.replace(/^\//, ""))
-      .filter((n) => !n.includes("/"));
+    if (!manifest || !manifest.commit || !Array.isArray(manifest.scripts)) {
+      throw new Error("Invalid manifest.json");
+    }
 
     return {
-      ref,
-      scripts: rootNames.filter((n) => n.endsWith(".js") && !SYSTEM_FILES.has(n)),
-      pages: rootNames.filter((n) => n.endsWith(".html")),
-      masterVersion: null
+      ref: manifest.commit,
+      scripts: manifest.scripts.filter((n) => n.endsWith(".js") && !SYSTEM_FILES.has(n)),
+      masterVersion: manifest.masterVersion || CURRENT_VERSION
     };
   }
 
@@ -194,7 +174,7 @@
 
   async function syncAndRun(runScripts = true, forcePurge = false) {
     const enabledMap = GM_getValue(STORAGE_KEY, {});
-    let cachedData = GM_getValue(CACHE_KEY, { scripts: [], pages: [] });
+    let cachedData = GM_getValue(CACHE_KEY, { scripts: [] });
 
     if (runScripts && cachedData.scripts.length > 0) {
       cachedData.scripts.forEach((s) => {
@@ -212,19 +192,9 @@
       const ref = state.ref;
       const cdnBase = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${ref}/`;
 
-      // Check if master.user.js has a newer version using exact commit URL (zero cache)
-      let latestMasterVer = state.masterVersion;
-      if (!latestMasterVer) {
-        try {
-          const mCode = await fetchUrl(`${cdnBase}master.user.js`);
-          const m = mCode.match(/\/\/\s*@version\s+([^\s]+)/);
-          if (m) latestMasterVer = m[1].trim();
-        } catch (e) {}
-      }
-
-      if (latestMasterVer && compareVersions(latestMasterVer, CURRENT_VERSION) > 0) {
+      if (state.masterVersion && compareVersions(state.masterVersion, CURRENT_VERSION) > 0) {
         GM_setValue(UPDATE_KEY, {
-          version: latestMasterVer,
+          version: state.masterVersion,
           url: `${cdnBase}master.user.js`
         });
       } else {
@@ -276,17 +246,11 @@
         });
       }
 
-      const htmlFiles = state.pages.map((pName) => ({
-        name: pName,
-        url: `https://${GITHUB_USER}.github.io/${GITHUB_REPO}/${pName}`
-      }));
-
       if (mapChanged) GM_setValue(STORAGE_KEY, enabledMap);
 
       const shortRef = ref.length > 7 ? ref.slice(0, 7) : ref;
       cachedData = {
         scripts: updatedScripts,
-        pages: htmlFiles,
         lastSync: `${new Date().toLocaleTimeString("en-US")} [${shortRef}]`
       };
       GM_setValue(CACHE_KEY, cachedData);
@@ -334,8 +298,6 @@
       <div id="gh-status" style="font-size:11px; color:#8b949e; text-align:center; margin-bottom:12px;"></div>
       <div style="font-size:12px; color:#8b949e; border-bottom:1px solid #30363d; padding-bottom:4px; margin-bottom:8px;">Available Scripts (JS)</div>
       <div id="gh-scripts-list"></div>
-      <div style="font-size:12px; color:#8b949e; border-bottom:1px solid #30363d; padding-bottom:4px; margin:12px 0 8px;">Pages (HTML)</div>
-      <div id="gh-pages-list"></div>
       <div style="font-size:11px; color:#8b949e; text-align:center; margin-top:12px;">Reload the page (F5) after enabling or disabling any script</div>
     `;
 
@@ -344,7 +306,7 @@
 
     const renderList = () => {
       const enabledMap = GM_getValue(STORAGE_KEY, {});
-      const data = GM_getValue(CACHE_KEY, { scripts: [], pages: [], lastSync: "-" });
+      const data = GM_getValue(CACHE_KEY, { scripts: [], lastSync: "-" });
       const pendingUpdate = GM_getValue(UPDATE_KEY, null);
 
       const banner = document.getElementById("gh-update-banner");
@@ -392,20 +354,13 @@
           listEl.appendChild(row);
         });
       }
-
-      const pagesEl = document.getElementById("gh-pages-list");
-      if (pagesEl) {
-        pagesEl.innerHTML = data.pages.length
-          ? data.pages.map((p) => `<a href="${p.url}" target="_blank" style="display:block; padding:7px 10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#58a6ff; text-decoration:none; font-size:12px; margin-bottom:5px; text-align:left;">🌐 ${p.name}</a>`).join("")
-          : `<div style="font-size:12px; color:#8b949e; text-align:center;">No HTML pages found</div>`;
-      }
     };
 
     const runLiveSync = async (purge) => {
       const btn = document.getElementById("gh-sync-btn");
       if (btn) {
         btn.disabled = true;
-        btn.textContent = "⏳ Syncing...";
+        btn.textContent = purge ? "⏳ Purging & Syncing..." : "⏳ Syncing...";
       }
       await syncAndRun(false, purge);
       renderList();
