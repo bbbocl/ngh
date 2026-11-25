@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Master Script Manager
 // @namespace    https://github.com/bbbocl/ngh
-// @version      1.4
-// @description  Cloud userscript manager via jsDelivr (Press Alt + M to open panel)
+// @version      1.5
+// @description  Cloud userscript manager via jsDelivr with instant purge (Alt + M)
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -25,12 +25,23 @@
   const basePath = FOLDER_PATH ? `${FOLDER_PATH}/` : "";
   const CDN_BASE = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/${basePath}`;
   const PURGE_BASE = `https://purge.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/${basePath}`;
+  const INDEX_API = `https://data.jsdelivr.com/v1/package/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/flat`;
 
-  function fetchUrl(url) {
+  function fetchUrl(url, bypassCache = true) {
     return new Promise((resolve, reject) => {
+      const finalUrl = bypassCache
+        ? url + (url.includes("?") ? "&" : "?") + "_cb=" + Date.now()
+        : url;
+
       GM_xmlhttpRequest({
         method: "GET",
-        url: url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(),
+        url: finalUrl,
+        nocache: true,
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
+        },
         onload: (res) => {
           if (res.status >= 200 && res.status < 300) resolve(res.responseText);
           else reject(new Error("HTTP " + res.status));
@@ -40,17 +51,20 @@
     });
   }
 
-  // Purge jsDelivr CDN cache on manual sync so updates appear immediately
+  // Must use exact canonical URL without query parameters for jsDelivr purge to work
   function purgeCdnFile(relativeFile) {
     return new Promise((resolve) => {
       GM_xmlhttpRequest({
         method: "GET",
-        url: `${PURGE_BASE}${relativeFile}?t=${Date.now()}`,
+        url: `${PURGE_BASE}${relativeFile}`,
+        nocache: true,
         onload: () => resolve(),
         onerror: () => resolve()
       });
     });
   }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function isUrlMatched(patterns, currentUrl) {
     if (!patterns || patterns.length === 0) return true;
@@ -63,7 +77,7 @@
     });
   }
 
-  // Bridge to support GM_xmlhttpRequest inside injected scripts (e.g. ntfy notifications)
+  // Bridge to support GM_xmlhttpRequest inside injected scripts
   window.addEventListener("__gh_gm_xhr__", (e) => {
     const { id, details } = e.detail || {};
     if (!id || !details) return;
@@ -85,7 +99,6 @@
     });
   });
 
-  // Inject script safely using GM_addElement (MV3 & CSP compatible)
   function executeScriptCode(code, fileName) {
     try {
       const wrappedCode = `(function(){
@@ -120,6 +133,42 @@
     }
   }
 
+  // Try auto-discovering all repo files via jsDelivr index API, fallback to scripts.json
+  async function discoverRepoFiles(forcePurge) {
+    try {
+      const indexRaw = await fetchUrl(INDEX_API, true);
+      const indexData = JSON.parse(indexRaw);
+      if (indexData && Array.isArray(indexData.files)) {
+        const prefix = FOLDER_PATH ? `/${FOLDER_PATH}/` : "/";
+        const allNames = indexData.files
+          .map((f) => f.name)
+          .filter((name) => name.startsWith(prefix))
+          .map((name) => name.slice(prefix.length))
+          .filter((name) => !name.includes("/"));
+
+        const scripts = allNames.filter((n) => n.endsWith(".js") && n !== "master.user.js");
+        const pages = allNames.filter((n) => n.endsWith(".html"));
+        if (scripts.length > 0 || pages.length > 0) {
+          return { scripts, pages, source: "auto-index" };
+        }
+      }
+    } catch (e) {
+      // Fallback to scripts.json if data.jsdelivr.com is blocked
+    }
+
+    if (forcePurge) {
+      await purgeCdnFile("scripts.json");
+      await sleep(1200);
+    }
+    const manifestRaw = await fetchUrl(`${CDN_BASE}scripts.json`, true);
+    const manifest = JSON.parse(manifestRaw);
+    return {
+      scripts: Array.isArray(manifest.scripts) ? manifest.scripts : [],
+      pages: Array.isArray(manifest.pages) ? manifest.pages : [],
+      source: "scripts.json"
+    };
+  }
+
   async function syncAndRun(runScripts = true, forcePurge = false) {
     const enabledMap = GM_getValue(STORAGE_KEY, {});
     let cachedData = GM_getValue(CACHE_KEY, { scripts: [], pages: [] });
@@ -133,15 +182,14 @@
     }
 
     try {
-      if (forcePurge) {
-        await purgeCdnFile("scripts.json");
+      const discovered = await discoverRepoFiles(forcePurge);
+      const scriptNames = discovered.scripts;
+      const pageNames = discovered.pages;
+
+      if (forcePurge && scriptNames.length > 0) {
+        await Promise.all(scriptNames.map((name) => purgeCdnFile(name)));
+        await sleep(1200);
       }
-
-      const manifestRaw = await fetchUrl(`${CDN_BASE}scripts.json`);
-      const manifest = JSON.parse(manifestRaw);
-
-      const scriptNames = Array.isArray(manifest.scripts) ? manifest.scripts : [];
-      const pageNames = Array.isArray(manifest.pages) ? manifest.pages : [];
 
       const updatedScripts = [];
       let mapChanged = false;
@@ -149,11 +197,7 @@
       for (const fileName of scriptNames) {
         if (!fileName || !fileName.endsWith(".js") || fileName === "master.user.js") continue;
 
-        if (forcePurge) {
-          await purgeCdnFile(fileName);
-        }
-
-        const code = await fetchUrl(`${CDN_BASE}${fileName}`);
+        const code = await fetchUrl(`${CDN_BASE}${fileName}`, true);
         const nameMatch = code.match(/\/\/\s*@name\s+(.+)/);
         const displayName = nameMatch ? nameMatch[1].trim() : fileName;
         const matches = [...code.matchAll(/\/\/\s*@match\s+(.+)/g)].map((m) => m[1].trim());
@@ -191,12 +235,12 @@
       cachedData = {
         scripts: updatedScripts,
         pages: htmlFiles,
-        lastSync: new Date().toLocaleTimeString("en-US")
+        lastSync: `${new Date().toLocaleTimeString("en-US")} (${discovered.source})`
       };
       GM_setValue(CACHE_KEY, cachedData);
       return cachedData;
     } catch (e) {
-      console.warn("[MasterRunner] jsDelivr sync failed, using cached scripts:", e.message);
+      console.warn("[MasterRunner] Sync failed, using cached scripts:", e.message);
       return cachedData;
     }
   }
@@ -284,9 +328,14 @@
     document.getElementById("gh-close-btn").onclick = () => overlay.remove();
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
     document.getElementById("gh-sync-btn").onclick = async () => {
-      document.getElementById("gh-status").textContent = "Purging cache & syncing...";
+      const btn = document.getElementById("gh-sync-btn");
+      btn.disabled = true;
+      btn.textContent = "⏳ Purging & Syncing...";
+      document.getElementById("gh-status").textContent = "Purging jsDelivr edge cache...";
       await syncAndRun(false, true);
       renderList();
+      btn.disabled = false;
+      btn.textContent = "🔄 Sync & Update (jsDelivr)";
     };
   }
 
