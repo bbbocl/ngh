@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Master Script Manager
 // @namespace    https://github.com/bbbocl/ngh
-// @version      1.3
-// @description  Cloud userscript manager (Press Alt + M to open panel)
+// @version      1.4
+// @description  Cloud userscript manager via jsDelivr (Press Alt + M to open panel)
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -16,10 +16,15 @@
 
   const GITHUB_USER = "bbbocl";
   const GITHUB_REPO = "ngh";
+  const BRANCH = "main";
   const FOLDER_PATH = "";
 
   const STORAGE_KEY = "gh_master_enabled_scripts";
   const CACHE_KEY = "gh_master_cached_files";
+
+  const basePath = FOLDER_PATH ? `${FOLDER_PATH}/` : "";
+  const CDN_BASE = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/${basePath}`;
+  const PURGE_BASE = `https://purge.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${BRANCH}/${basePath}`;
 
   function fetchUrl(url) {
     return new Promise((resolve, reject) => {
@@ -30,7 +35,19 @@
           if (res.status >= 200 && res.status < 300) resolve(res.responseText);
           else reject(new Error("HTTP " + res.status));
         },
-        onerror: () => reject(new Error("Failed to connect to GitHub"))
+        onerror: () => reject(new Error("Network error"))
+      });
+    });
+  }
+
+  // Purge jsDelivr CDN cache on manual sync so updates appear immediately
+  function purgeCdnFile(relativeFile) {
+    return new Promise((resolve) => {
+      GM_xmlhttpRequest({
+        method: "GET",
+        url: `${PURGE_BASE}${relativeFile}?t=${Date.now()}`,
+        onload: () => resolve(),
+        onerror: () => resolve()
       });
     });
   }
@@ -103,7 +120,7 @@
     }
   }
 
-  async function syncAndRun(runScripts = true) {
+  async function syncAndRun(runScripts = true, forcePurge = false) {
     const enabledMap = GM_getValue(STORAGE_KEY, {});
     let cachedData = GM_getValue(CACHE_KEY, { scripts: [], pages: [] });
 
@@ -116,53 +133,70 @@
     }
 
     try {
-      const pathSegment = FOLDER_PATH ? `/${FOLDER_PATH}` : "";
-      const apiUrl = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents${pathSegment}`;
-      const rawJson = await fetchUrl(apiUrl);
-      const items = JSON.parse(rawJson);
+      if (forcePurge) {
+        await purgeCdnFile("scripts.json");
+      }
 
-      if (!Array.isArray(items)) return cachedData;
+      const manifestRaw = await fetchUrl(`${CDN_BASE}scripts.json`);
+      const manifest = JSON.parse(manifestRaw);
 
-      const jsFiles = items.filter(
-        (f) => f.type === "file" && f.name.endsWith(".js") && f.name !== "master.user.js"
-      );
-
-      const htmlFiles = items
-        .filter((f) => f.type === "file" && f.name.endsWith(".html"))
-        .map((f) => ({
-          name: f.name,
-          url: `https://${GITHUB_USER}.github.io/${GITHUB_REPO}${pathSegment}/${f.name}`
-        }));
+      const scriptNames = Array.isArray(manifest.scripts) ? manifest.scripts : [];
+      const pageNames = Array.isArray(manifest.pages) ? manifest.pages : [];
 
       const updatedScripts = [];
       let mapChanged = false;
 
-      for (const file of jsFiles) {
-        const code = await fetchUrl(file.download_url);
-        const nameMatch = code.match(/\/\/\s*@name\s+(.+)/);
-        const displayName = nameMatch ? nameMatch[1].trim() : file.name;
-        const matches = [...code.matchAll(/\/\/\s*@match\s+(.+)/g)].map((m) => m[1].trim());
+      for (const fileName of scriptNames) {
+        if (!fileName || !fileName.endsWith(".js") || fileName === "master.user.js") continue;
 
-        if (!(file.name in enabledMap)) {
-          enabledMap[file.name] = false;
+        if (forcePurge) {
+          await purgeCdnFile(fileName);
+        }
+
+        const code = await fetchUrl(`${CDN_BASE}${fileName}`);
+        const nameMatch = code.match(/\/\/\s*@name\s+(.+)/);
+        const displayName = nameMatch ? nameMatch[1].trim() : fileName;
+        const matches = [...code.matchAll(/\/\/\s*@match\s+(.+)/g)].map((m) => m[1].trim());
+        const autoMatch = code.match(/\/\/\s*@auto\s+(true|false)/i);
+        const forceMatch = code.match(/\/\/\s*@force\s+(true|false)/i);
+
+        if (!(fileName in enabledMap)) {
+          enabledMap[fileName] = autoMatch ? autoMatch[1].toLowerCase() === "true" : false;
           mapChanged = true;
         }
 
+        if (forceMatch) {
+          const forcedState = forceMatch[1].toLowerCase() === "true";
+          if (enabledMap[fileName] !== forcedState) {
+            enabledMap[fileName] = forcedState;
+            mapChanged = true;
+          }
+        }
+
         updatedScripts.push({
-          fileName: file.name,
+          fileName,
           displayName,
           matches,
           code
         });
       }
 
+      const htmlFiles = pageNames.map((pName) => ({
+        name: pName,
+        url: `https://${GITHUB_USER}.github.io/${GITHUB_REPO}/${basePath}${pName}`
+      }));
+
       if (mapChanged) GM_setValue(STORAGE_KEY, enabledMap);
 
-      cachedData = { scripts: updatedScripts, pages: htmlFiles, lastSync: new Date().toLocaleTimeString("en-US") };
+      cachedData = {
+        scripts: updatedScripts,
+        pages: htmlFiles,
+        lastSync: new Date().toLocaleTimeString("en-US")
+      };
       GM_setValue(CACHE_KEY, cachedData);
       return cachedData;
     } catch (e) {
-      console.warn("[MasterRunner] GitHub sync failed, using cached scripts:", e.message);
+      console.warn("[MasterRunner] jsDelivr sync failed, using cached scripts:", e.message);
       return cachedData;
     }
   }
@@ -193,7 +227,7 @@
         <button id="gh-close-btn" style="background:none; border:none; color:#8b949e; font-size:18px; cursor:pointer;" title="Close">✖</button>
       </div>
       <button id="gh-sync-btn" style="width:100%; padding:9px; background:#238636; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; margin-bottom:8px;">
-        🔄 Sync & Update from GitHub
+        🔄 Sync & Update (jsDelivr)
       </button>
       <div id="gh-status" style="font-size:11px; color:#8b949e; text-align:center; margin-bottom:12px;"></div>
       <div style="font-size:12px; color:#8b949e; border-bottom:1px solid #30363d; padding-bottom:4px; margin-bottom:8px;">Available Scripts (JS)</div>
@@ -250,8 +284,8 @@
     document.getElementById("gh-close-btn").onclick = () => overlay.remove();
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
     document.getElementById("gh-sync-btn").onclick = async () => {
-      document.getElementById("gh-status").textContent = "Syncing from GitHub...";
-      await syncAndRun(false);
+      document.getElementById("gh-status").textContent = "Purging cache & syncing...";
+      await syncAndRun(false, true);
       renderList();
     };
   }
@@ -263,5 +297,5 @@
     }
   });
 
-  syncAndRun(true);
+  syncAndRun(true, false);
 })();
