@@ -1,6 +1,6 @@
 {
-  "commit": "b6d4665677c0f3f14105610711e06236772c2e38",
-  "updatedAt": "2026-11-25T22:01:26.948Z",
+  "commit": "f5469712e926367ebcd420fa803482d70453dcad",
+  "updatedAt": "2026-11-26T10:17:11.324Z",
   "masterVersion": "3.2",
   "scripts": [
     "api_inspector.js",
@@ -10,6 +10,7 @@
     "ecg.js",
     "ecg_print.js",
     "er_patients.js",
-    "scan.js"
+    "scan.js",
+    "star.js"
   ]
 }
