@@ -1,14 +1,17 @@
-// @name auto scan
-// @match https://apphiss1vi.moh.gov.sa/*
+// @name Auto Scan
+// @match https://apphiss1vi.moh.gov.sa/er/*
 
 (function () {
   'use strict';
 
+  const TARGET_URL_PREFIX = 'https://apphiss1vi.moh.gov.sa/er/#/patient/';
   const BTN_ID = 'abdullah-floating-scan-btn';
   const STYLE_ID = 'abdullah-floating-scan-style';
   let isRunning = false;
 
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  const isTargetRoute = () => window.location.href.startsWith(TARGET_URL_PREFIX);
 
   const realClick = (selector, name) => {
     const el = document.querySelector(selector);
@@ -61,10 +64,10 @@
   };
 
   async function runScanWorkflow(btn) {
-    if (isRunning) return;
+    if (isRunning || !isTargetRoute()) return;
     isRunning = true;
     const originalText = btn.textContent;
-    btn.textContent = 'scanning...';
+    btn.textContent = 'SCANNING...';
     btn.disabled = true;
 
     try {
@@ -130,11 +133,11 @@
         top: '50%',
         left: '50%',
         transform: 'translate(-50%,-50%)',
-        background: 'rgba(0,0,0,0.8)',
+        background: 'rgba(0,0,0,0.85)',
         color: '#fff',
         padding: '20px 40px',
         borderRadius: '10px',
-        zIndex: '999999',
+        zIndex: '2147483647',
         fontSize: '24px',
         fontWeight: 'bold',
         pointerEvents: 'none'
@@ -157,58 +160,70 @@
     style.textContent = `
       #${BTN_ID} {
         position: fixed;
-        top: 12px;
-        left: 12px;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
         z-index: 2147483646;
-        background: #0f766e;
+        min-width: 240px;
+        padding: 10px 36px;
+        background: linear-gradient(135deg, #0f766e, #0d9488);
         color: #ffffff;
-        border: none;
-        border-radius: 8px;
-        padding: 8px 16px;
+        border: 2px solid #ffffff;
+        border-radius: 10px;
         font-family: system-ui, -apple-system, sans-serif;
-        font-size: 13px;
-        font-weight: 700;
-        text-transform: lowercase;
-        letter-spacing: 0.4px;
+        font-size: 16px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 1px;
         cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-        transition: background 0.2s ease, transform 0.1s ease, opacity 0.2s ease;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+        transition: background 0.2s ease, transform 0.1s ease, opacity 0.2s ease, box-shadow 0.2s ease;
       }
       #${BTN_ID}:hover:not(:disabled) {
-        background: #115e59;
-        transform: translateY(-1px);
+        background: linear-gradient(135deg, #115e59, #0f766e);
+        transform: translateX(-50%) translateY(-1px);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
       }
       #${BTN_ID}:active:not(:disabled) {
-        transform: translateY(0);
+        transform: translateX(-50%) translateY(0);
       }
       #${BTN_ID}:disabled {
-        opacity: 0.7;
+        opacity: 0.75;
         cursor: wait;
       }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
 
-  function ensureFloatingButton() {
+  function syncFloatingButton() {
     if (!document.body) return;
+
+    const existingBtn = document.getElementById(BTN_ID);
+
+    if (!isTargetRoute()) {
+      if (existingBtn) existingBtn.remove();
+      return;
+    }
+
     injectStyles();
-    if (document.getElementById(BTN_ID)) return;
+    if (existingBtn) return;
 
     const btn = document.createElement('button');
     btn.id = BTN_ID;
     btn.type = 'button';
-    btn.textContent = 'scan';
-    btn.title = 'تشغيل أتمتة المسح الضوئي';
+    btn.textContent = 'AUTO SCAN';
+    btn.title = 'Run automated document scan workflow';
     btn.addEventListener('click', () => runScanWorkflow(btn));
     document.body.appendChild(btn);
   }
 
-  ensureFloatingButton();
+  syncFloatingButton();
+
+  window.addEventListener('hashchange', syncFloatingButton);
+  window.addEventListener('popstate', syncFloatingButton);
 
   const observer = new MutationObserver(() => {
-    if (!document.getElementById(BTN_ID)) {
-      ensureFloatingButton();
-    }
+    syncFloatingButton();
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
