@@ -1,12 +1,13 @@
 {
-  "commit": "988571f82c0f6acc230783b3527f054ab60b5ba7",
-  "updatedAt": "2026-11-27T15:44:21.846Z",
+  "commit": "e79778d04d0cd4c225ab8e38eaf290957229147d",
+  "updatedAt": "2026-11-27T17:53:30.614Z",
   "masterVersion": "3.2",
   "scripts": [
     "api_inspector.js",
     "botton.js",
     "copy.js",
     "css_picker.js",
+    "dblclick.js",
     "ecg.js",
     "ecg_print.js",
     "er_patients.js",
