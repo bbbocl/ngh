@@ -5,8 +5,8 @@
   'use strict';
 
   const TARGET_URL_PREFIX = 'https://apphiss1vi.moh.gov.sa/er/#/patient/';
-  const BTN_ID = 'abdullah-floating-scan-btn';
-  const STYLE_ID = 'abdullah-floating-scan-style';
+  const BTN_ID = 'abdullah-inline-scan-btn';
+  const STYLE_ID = 'abdullah-inline-scan-style';
   let isRunning = false;
 
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -67,7 +67,7 @@
     if (isRunning || !isTargetRoute()) return;
     isRunning = true;
     const originalText = btn.textContent;
-    btn.textContent = 'SCANNING...';
+    btn.textContent = 'Scanning...';
     btn.disabled = true;
 
     try {
@@ -159,43 +159,60 @@
     style.id = STYLE_ID;
     style.textContent = `
       #${BTN_ID} {
-        position: fixed;
-        top: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 2147483646;
-        min-width: 240px;
-        padding: 10px 36px;
-        background: linear-gradient(135deg, #0f766e, #0d9488);
-        color: #ffffff;
-        border: 2px solid #ffffff;
-        border-radius: 10px;
-        font-family: system-ui, -apple-system, sans-serif;
-        font-size: 16px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 1px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #16a34a !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 9999px !important;
+        padding: 6px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.4;
+        white-space: nowrap;
         cursor: pointer;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
-        transition: background 0.2s ease, transform 0.1s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+        vertical-align: middle;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+        transition: background-color 0.15s ease, opacity 0.15s ease;
       }
       #${BTN_ID}:hover:not(:disabled) {
-        background: linear-gradient(135deg, #115e59, #0f766e);
-        transform: translateX(-50%) translateY(-1px);
-        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+        background-color: #15803d !important;
       }
       #${BTN_ID}:active:not(:disabled) {
-        transform: translateX(-50%) translateY(0);
+        background-color: #166534 !important;
       }
       #${BTN_ID}:disabled {
-        opacity: 0.75;
+        opacity: 0.7;
         cursor: wait;
       }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
 
-  function syncFloatingButton() {
+  function findInsertionTarget() {
+    const shortcutsBtn = document.querySelector('.shortcuts-btn');
+    if (!shortcutsBtn) return null;
+
+    // Walk up from .shortcuts-btn until we find the element whose previous sibling is the Discharge button
+    let anchor = shortcutsBtn;
+    while (anchor && anchor.parentElement && anchor.parentElement !== document.body) {
+      const prev = anchor.previousElementSibling;
+      if (prev && (prev.tagName === 'BUTTON' || prev.querySelector('button'))) {
+        return { container: anchor.parentElement, beforeNode: anchor, referenceBtn: prev };
+      }
+      anchor = anchor.parentElement;
+    }
+
+    // Fallback: insert directly before .shortcuts-btn
+    return {
+      container: shortcutsBtn.parentElement,
+      beforeNode: shortcutsBtn,
+      referenceBtn: shortcutsBtn.previousElementSibling
+    };
+  }
+
+  function syncInlineButton() {
     if (!document.body) return;
 
     const existingBtn = document.getElementById(BTN_ID);
@@ -206,24 +223,50 @@
     }
 
     injectStyles();
-    if (existingBtn) return;
+
+    const target = findInsertionTarget();
+    if (!target || !target.container) return;
+
+    // Avoid duplicate injection if already placed right before the 3-dots container
+    if (existingBtn && existingBtn.nextElementSibling === target.beforeNode) return;
+    if (existingBtn) existingBtn.remove();
 
     const btn = document.createElement('button');
     btn.id = BTN_ID;
     btn.type = 'button';
-    btn.textContent = 'AUTO SCAN';
+    btn.textContent = 'Auto Scan';
     btn.title = 'Run automated document scan workflow';
+
+    // Match exact height, font, and spacing of the adjacent Discharge/Admission pill button
+    const refButton =
+      target.referenceBtn && target.referenceBtn.tagName === 'BUTTON'
+        ? target.referenceBtn
+        : target.referenceBtn?.querySelector('button');
+
+    if (refButton) {
+      const cs = window.getComputedStyle(refButton);
+      btn.style.height = cs.height;
+      btn.style.padding = cs.padding;
+      btn.style.fontSize = cs.fontSize;
+      btn.style.fontWeight = cs.fontWeight;
+      btn.style.fontFamily = cs.fontFamily;
+      btn.style.marginLeft = cs.marginLeft !== '0px' ? cs.marginLeft : '6px';
+      btn.style.marginRight = cs.marginRight !== '0px' ? cs.marginRight : '6px';
+    } else {
+      btn.style.margin = '0 6px';
+    }
+
     btn.addEventListener('click', () => runScanWorkflow(btn));
-    document.body.appendChild(btn);
+    target.container.insertBefore(btn, target.beforeNode);
   }
 
-  syncFloatingButton();
+  syncInlineButton();
 
-  window.addEventListener('hashchange', syncFloatingButton);
-  window.addEventListener('popstate', syncFloatingButton);
+  window.addEventListener('hashchange', syncInlineButton);
+  window.addEventListener('popstate', syncInlineButton);
 
   const observer = new MutationObserver(() => {
-    syncFloatingButton();
+    syncInlineButton();
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
