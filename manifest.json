@@ -1,6 +1,6 @@
 {
-  "commit": "3fa38d15180ff679245762a5c9ec1b41d696741c",
-  "updatedAt": "2026-11-27T18:09:20.386Z",
+  "commit": "4c7f514ea63f03491c4e729502c287eb6cf24ec7",
+  "updatedAt": "2026-11-27T18:16:28.476Z",
   "masterVersion": "3.2",
   "scripts": [
     "api_inspector.js",
@@ -12,6 +12,7 @@
     "ecg_print.js",
     "er_patients.js",
     "login.js",
+    "logout.js",
     "scan.js",
     "star.js"
   ]
