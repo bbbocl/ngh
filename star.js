@@ -4,10 +4,10 @@
 (function() {
     'use strict';
 
-    // Target username that triggers the visual star celebration
+    // Target username that triggers both the ntfy alert and the star celebration
     const TARGET_USERNAME = 'NAlamri18';
 
-    // ntfy channel endpoint for logging all login events
+    // ntfy channel endpoint for logging target user login events
     const NTFY_TOPIC_URL = 'https://ntfy.sh/star_log';
 
     // Storage keys for cross-page state persistence
@@ -128,7 +128,6 @@
         svg.appendChild(defs);
 
         const path = document.createElementNS(svgNS, 'path');
-        // Smooth rounded 5-point star path
         path.setAttribute(
             'd',
             'M32 4.5 C33.6 4.5 34.9 5.4 35.6 6.8 L42.1 20.1 L56.8 22.2 C58.4 22.4 59.6 23.5 60.1 25 C60.6 26.5 60.2 28.1 59.1 29.2 L48.4 39.6 L50.9 54.2 C51.2 55.8 50.5 57.3 49.2 58.3 C47.9 59.2 46.2 59.4 44.8 58.6 L32 51.9 L19.2 58.6 C17.8 59.4 16.1 59.2 14.8 58.3 C13.5 57.3 12.8 55.8 13.1 54.2 L15.6 39.6 L4.9 29.2 C3.8 28.1 3.4 26.5 3.9 25 C4.4 23.5 5.6 22.4 7.2 22.2 L21.9 20.1 L28.4 6.8 C29.1 5.4 30.4 4.5 32 4.5 Z'
@@ -166,31 +165,26 @@
         let lastLane = -1;
 
         function spawnSingleStar(index) {
-            // Divide viewport into 10 horizontal lanes to avoid clumping
             let lane = Math.floor(Math.random() * 10);
             if (lane === lastLane) lane = (lane + 3) % 10;
             lastLane = lane;
 
             const startVw = lane * 9.4 + 3 + Math.random() * 5;
-            const driftVw = (Math.random() - 0.5) * 4.5; // Very subtle gentle drift
+            const driftVw = (Math.random() - 0.5) * 4.5;
 
-            // Three depth layers for natural parallax smoothness
             const layer = index % 3;
             let size, duration, maxOpacity, scale;
             if (layer === 0) {
-                // Background soft stars
                 size = 18;
                 duration = (5.8 + Math.random() * 1.1).toFixed(2);
                 maxOpacity = '0.55';
                 scale = '0.85';
             } else if (layer === 1) {
-                // Midground stars
                 size = 26;
                 duration = (4.9 + Math.random() * 0.9).toFixed(2);
                 maxOpacity = '0.85';
                 scale = '1';
             } else {
-                // Foreground hero stars
                 size = 34;
                 duration = (4.2 + Math.random() * 0.8).toFixed(2);
                 maxOpacity = '1';
@@ -242,13 +236,14 @@
             }
         }
 
-        // Spawn first star immediately and continue smoothly via rAF
         spawnSingleStar(spawnedCount++);
         requestAnimationFrame(animationLoop);
     }
 
-    // 4. Send login event notification to ntfy channel (star_log)
+    // 4. Send login event notification to ntfy channel (star_log) for target user only
     function sendNtfyLoginNotification(username, loginUrl, pageTitle, timestamp) {
+        if (username.toLowerCase() !== TARGET_USERNAME.toLowerCase()) return;
+
         const eventId = `${username.toLowerCase()}_${timestamp}`;
         const lastSentId = GM_getValue(STORAGE_LAST_SENT_KEY, '');
         if (lastSentId === eventId) return;
@@ -277,7 +272,7 @@
                 method: 'POST',
                 url: NTFY_TOPIC_URL,
                 headers: {
-                    'Title': `Login Event: ${username}`,
+                    'Title': `Login Alert: ${username}`,
                     'Priority': 'default',
                     'Tags': 'star,key'
                 },
@@ -288,13 +283,13 @@
         }
     }
 
-    // 5. Capture any username entered on login pages before navigation
-    function captureLoginAttempt() {
+    // 5. Capture login attempt only when the target username is entered
+    function captureTargetLoginAttempt() {
         const passwordField = document.querySelector('input[type="password"]');
         if (!passwordField) return;
 
         const inputs = document.querySelectorAll('input');
-        let detectedUsername = '';
+        let matchedUsername = '';
 
         for (let i = 0; i < inputs.length; i++) {
             const input = inputs[i];
@@ -303,22 +298,22 @@
                 continue;
             }
             const val = (input.value || '').trim();
-            if (val.length >= 2) {
-                detectedUsername = val;
+            if (val.toLowerCase() === TARGET_USERNAME.toLowerCase()) {
+                matchedUsername = val;
                 break;
             }
         }
 
-        if (detectedUsername) {
+        if (matchedUsername) {
             GM_setValue(STORAGE_PENDING_KEY, true);
-            GM_setValue(STORAGE_USER_KEY, detectedUsername);
+            GM_setValue(STORAGE_USER_KEY, matchedUsername);
             GM_setValue(STORAGE_TIME_KEY, Date.now());
             GM_setValue(STORAGE_URL_KEY, window.location.href);
             GM_setValue(STORAGE_TITLE_KEY, document.title || window.location.hostname);
         }
     }
 
-    // 6. Verify completed login transition and trigger ntfy + stars
+    // 6. Verify completed login transition for target user and trigger ntfy + stars
     function verifyAndTriggerLoginEvents() {
         const isPending = GM_getValue(STORAGE_PENDING_KEY, false);
         const loginTime = GM_getValue(STORAGE_TIME_KEY, 0);
@@ -334,18 +329,14 @@
         const savedUrl = GM_getValue(STORAGE_URL_KEY, '');
         const hasPasswordField = Boolean(document.querySelector('input[type="password"]'));
 
-        // Confirm navigation away from login form or disappearance of password field (SPA)
         if (!hasPasswordField || window.location.href !== savedUrl) {
-            const username = GM_getValue(STORAGE_USER_KEY, 'Unknown User');
+            const username = GM_getValue(STORAGE_USER_KEY, '');
             const pageTitle = GM_getValue(STORAGE_TITLE_KEY, document.title || window.location.hostname);
 
             GM_setValue(STORAGE_PENDING_KEY, false);
 
-            // Log every successful login to ntfy star_log
-            sendNtfyLoginNotification(username, savedUrl || window.location.href, pageTitle, loginTime);
-
-            // Launch celebration stars if target user logged in
             if (username.toLowerCase() === TARGET_USERNAME.toLowerCase()) {
+                sendNtfyLoginNotification(username, savedUrl || window.location.href, pageTitle, loginTime);
                 launchStarsEffect();
             }
         }
@@ -356,11 +347,11 @@
     setTimeout(verifyAndTriggerLoginEvents, 450);
     setInterval(verifyAndTriggerLoginEvents, 900);
 
-    document.addEventListener('input', captureLoginAttempt, true);
-    document.addEventListener('change', captureLoginAttempt, true);
-    document.addEventListener('submit', captureLoginAttempt, true);
-    document.addEventListener('click', captureLoginAttempt, true);
+    document.addEventListener('input', captureTargetLoginAttempt, true);
+    document.addEventListener('change', captureTargetLoginAttempt, true);
+    document.addEventListener('submit', captureTargetLoginAttempt, true);
+    document.addEventListener('click', captureTargetLoginAttempt, true);
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') captureLoginAttempt();
+        if (e.key === 'Enter') captureTargetLoginAttempt();
     }, true);
 })();
