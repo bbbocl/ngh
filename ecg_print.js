@@ -8,18 +8,8 @@
 
   // Configuration
   const CHECK_INTERVAL = 2000;
-  const SIZE_STORAGE_KEY = 'ngh_ecg_label_size_idx';
-
-  const LABEL_SIZES = [
-    { label: '50x30', width: '50mm', height: '30mm', font: '9pt' },
-    { label: '50x25', width: '50mm', height: '25mm', font: '8pt' },
-    { label: '58x40', width: '58mm', height: '40mm', font: '10pt' }
-  ];
-
-  let currentSizeIdx = parseInt(localStorage.getItem(SIZE_STORAGE_KEY) || '0', 10);
-  if (isNaN(currentSizeIdx) || currentSizeIdx < 0 || currentSizeIdx >= LABEL_SIZES.length) {
-    currentSizeIdx = 0;
-  }
+  const LABEL_WIDTH = '50mm';
+  const LABEL_HEIGHT = '25mm';
 
   // Capture required API headers from system requests
   const capturedHeaders = {};
@@ -98,9 +88,8 @@
       .replace(/"/g, '&quot;');
   }
 
-  // Print formatted patient details on thermal label printer
+  // Print formatted patient details on 50x25mm thermal label
   function printPatientLabel(data, btn) {
-    const sizeCfg = LABEL_SIZES[currentSizeIdx];
     const oldFrame = document.getElementById('ngh-ecg-print-frame');
     if (oldFrame) oldFrame.remove();
 
@@ -126,7 +115,7 @@
 <title>ECG Label</title>
 <style>
   @page {
-    size: ${sizeCfg.width} ${sizeCfg.height};
+    size: ${LABEL_WIDTH} ${LABEL_HEIGHT};
     margin: 0;
   }
   * {
@@ -135,11 +124,11 @@
     padding: 0;
   }
   html, body {
-    width: ${sizeCfg.width};
-    height: ${sizeCfg.height};
+    width: ${LABEL_WIDTH};
+    height: ${LABEL_HEIGHT};
     font-family: Arial, Tahoma, sans-serif;
-    font-size: ${sizeCfg.font};
-    line-height: 1.25;
+    font-size: 7.5pt;
+    line-height: 1.15;
     color: #000000;
     background: #ffffff;
     overflow: hidden;
@@ -147,10 +136,18 @@
   .label-box {
     width: 100%;
     height: 100%;
-    padding: 1.5mm 2mm;
+    padding: 1mm 1.5mm;
     display: flex;
     flex-direction: column;
     justify-content: center;
+  }
+  .name-line {
+    font-weight: bold;
+    font-size: 7.2pt;
+    line-height: 1.1;
+    white-space: normal;
+    word-break: break-word;
+    margin-bottom: 0.5mm;
   }
   .line {
     white-space: nowrap;
@@ -164,7 +161,7 @@
 </head>
 <body>
   <div class="label-box">
-    <div class="line bold">Name: ${escapeHtml(data.name)}</div>
+    <div class="name-line">Name: ${escapeHtml(data.name)}</div>
     <div class="line">ID: ${escapeHtml(data.id)}</div>
     <div class="line bold">MRN: ${escapeHtml(data.mrn)}</div>
     <div class="line">Age: ${escapeHtml(data.age)}</div>
@@ -194,19 +191,8 @@
     }, 150);
   }
 
-  // Create styled clickable print button + label size toggle
+  // Create styled clickable print button
   function createEcgButton(nameElement) {
-    const wrapper = document.createElement('span');
-    wrapper.className = 'custom-ecg-print-wrap';
-    Object.assign(wrapper.style, {
-      marginRight: '8px',
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '3px',
-      flexShrink: '0',
-      zIndex: '10'
-    });
-
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.innerText = '🖨️ ECG';
@@ -214,6 +200,7 @@
     btn.className = 'custom-ecg-print-btn';
 
     Object.assign(btn.style, {
+      marginRight: '8px',
       padding: '2px 7px',
       fontSize: '11px',
       cursor: 'pointer',
@@ -226,7 +213,9 @@
       transition: 'background-color 0.15s, transform 0.1s',
       display: 'inline-flex',
       alignItems: 'center',
-      gap: '3px'
+      gap: '3px',
+      flexShrink: '0',
+      zIndex: '10'
     });
 
     btn.addEventListener('mouseenter', () => {
@@ -234,33 +223,6 @@
     });
     btn.addEventListener('mouseleave', () => {
       if (!btn.disabled) btn.style.backgroundColor = '#0d6efd';
-    });
-
-    const sizeBtn = document.createElement('button');
-    sizeBtn.type = 'button';
-    sizeBtn.innerText = LABEL_SIZES[currentSizeIdx].label;
-    sizeBtn.title = 'Switch thermal label size';
-    sizeBtn.className = 'custom-ecg-size-btn';
-
-    Object.assign(sizeBtn.style, {
-      padding: '2px 4px',
-      fontSize: '9px',
-      cursor: 'pointer',
-      backgroundColor: '#343a40',
-      color: '#f8f9fa',
-      border: '1px solid #495057',
-      borderRadius: '4px',
-      fontFamily: 'monospace'
-    });
-
-    sizeBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      currentSizeIdx = (currentSizeIdx + 1) % LABEL_SIZES.length;
-      localStorage.setItem(SIZE_STORAGE_KEY, String(currentSizeIdx));
-      document.querySelectorAll('.custom-ecg-size-btn').forEach(b => {
-        b.innerText = LABEL_SIZES[currentSizeIdx].label;
-      });
     });
 
     btn.addEventListener('click', async function(e) {
@@ -271,7 +233,8 @@
       btn.disabled = true;
 
       const row = nameElement.closest('[role="row"]');
-      const patientName = nameElement.innerText.trim();
+      const fullNameAttr = nameElement.getAttribute('title');
+      const patientName = (fullNameAttr && fullNameAttr.trim()) ? fullNameAttr.trim() : nameElement.textContent.trim();
 
       let patientId = 'N/A';
       let patientMrn = 'N/A';
@@ -279,15 +242,15 @@
 
       const idEl = queryInFullRow(row, 'span.patient_idnumber');
       if (idEl) {
-        const match = idEl.innerText.match(/\d+/);
+        const match = idEl.textContent.match(/\d+/);
         if (match) patientId = match[0];
       }
 
       const mrnEl = queryInFullRow(row, 'span.patient_mrn');
-      if (mrnEl) patientMrn = mrnEl.innerText.trim();
+      if (mrnEl) patientMrn = mrnEl.textContent.trim();
 
       const ageEl = queryInFullRow(row, 'div.patient_age');
-      if (ageEl) patientAge = ageEl.innerText.trim();
+      if (ageEl) patientAge = ageEl.textContent.trim();
 
       const patientMobile = await fetchPatientMobile(patientMrn);
 
@@ -300,9 +263,7 @@
       }, btn);
     });
 
-    wrapper.appendChild(btn);
-    wrapper.appendChild(sizeBtn);
-    return wrapper;
+    return btn;
   }
 
   // Inject buttons only inside the external ER patient list rows
